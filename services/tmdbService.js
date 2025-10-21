@@ -1,4 +1,6 @@
 const axios = require('axios');
+const AppError = require('../errors/AppError');
+const NotFoundError = require('../errors/NotFoundError');
 
 class TMDbService {
     constructor() {
@@ -26,7 +28,10 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore ricerca: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                throw new NotFoundError('Contenuto non trovato');
+            }
+            throw new AppError(`Errore ricerca: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -41,7 +46,10 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore ricerca film: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                throw new NotFoundError('Film non trovato');
+            }
+            throw new AppError(`Errore ricerca film: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -56,7 +64,10 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore ricerca serie TV: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                throw new NotFoundError('Serie TV non trovata');
+            }
+            throw new AppError(`Errore ricerca serie TV: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -70,7 +81,10 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore dettagli film: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                throw new NotFoundError('Film non trovato');
+            }
+            throw new AppError(`Errore dettagli film: ${error.message}`, error.response?.status || 500);
         }
     }
     async getTVShowDetails(tvId) {
@@ -83,7 +97,10 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore dettagli serie TV: ${error.message}`);
+            if (error.response && error.response.status === 404) {
+                throw new NotFoundError('Serie TV non trovata');
+            }
+            throw new AppError(`Errore dettagli serie TV: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -97,7 +114,7 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore film popolari: ${error.message}`);
+            throw new AppError(`Errore film popolari: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -111,7 +128,7 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore serie TV popolari: ${error.message}`);
+            throw new AppError(`Errore serie TV popolari: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -124,7 +141,7 @@ class TMDbService {
             });
             return response.data;
         } catch (error) {
-            throw new Error(`Errore contenuti trending: ${error.message}`);
+            throw new AppError(`Errore contenuti trending: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -137,7 +154,7 @@ class TMDbService {
             });
             return response.data.genres;
         } catch (error) {
-            throw new Error(`Errore generi film: ${error.message}`);
+            throw new AppError(`Errore generi film: ${error.message}`, error.response?.status || 500);
         }
     }
 
@@ -150,7 +167,7 @@ class TMDbService {
             });
             return response.data.genres;
         } catch (error) {
-            throw new Error(`Errore generi serie TV: ${error.message}`);
+            throw new AppError(`Errore generi serie TV: ${error.message}`, error.response?.status || 500);
         }
     }
 
