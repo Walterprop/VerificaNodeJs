@@ -1,163 +1,480 @@
 <!DOCTYPE html>
-<html>
+<html lang="it">
 <head>
-    <title>Todo App</title>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ShowTracker</title>
 </head>
 <body>
-    <h1>Todo App</h1>
-    <p>Utente: <span id="username"></span> <button onclick="logout()">Logout</button></p>
+    <header>
+        <h1>ShowTracker</h1>
+        <div>
+            <span>Benvenuto, <span id="username"></span></span>
+            <button onclick="logout()">Logout</button>
+        </div>
+    </header>
     
-    <h2>Aggiungi Task</h2>
-    <form id="taskForm">
-        <input type="text" id="title" placeholder="Titolo" required>
-        <textarea id="description" placeholder="Descrizione"></textarea>
-        <button type="submit">Aggiungi</button>
-    </form>
+    <main>
+        <section id="search-section">
+            <h2>Cerca Film e Serie TV</h2>
+            <form id="searchForm">
+                <input type="text" id="searchQuery" placeholder="Cerca titolo..." required>
+                <select id="searchType">
+                    <option value="multi">Tutto</option>
+                    <option value="movie">Solo Film</option>
+                    <option value="tv">Solo Serie TV</option>
+                </select>
+                <button type="submit">Cerca</button>
+            </form>
+            <div id="searchResults"></div>
+        </section>
+        
+        <section id="library-section">
+            <h2>La Mia Libreria</h2>
+            <div>
+                <button onclick="showMovies()">Film</button>
+                <button onclick="showSeries()">Serie TV</button>
+                <button onclick="showStats()">Statistiche</button>
+            </div>
+            <div id="libraryContent"></div>
+        </section>
+        
+        <section id="popular-section">
+            <h2>Popolari</h2>
+            <div>
+                <button onclick="loadPopularMovies()">Film Popolari</button>
+                <button onclick="loadPopularTV()">Serie TV Popolari</button>
+                <button onclick="loadTrending()">Trending</button>
+            </div>
+            <div id="popularContent"></div>
+        </section>
+    </main>
     
-    <h2>Le Tue Task</h2>
-    <div>
-        <button onclick="showAll()">Tutte</button>
-        <button onclick="showPending()">In Sospeso</button>
-        <button onclick="showCompleted()">Completate</button>
-    </div>
-    
-    <div id="tasks"></div>
     <div id="message"></div>
 
     <script>
-        let tasks = [];
-        let filter = 'all';
         let authToken = localStorage.getItem('authToken');
+        let userData = JSON.parse(localStorage.getItem('userData') || '{}');
         
-        // Controllo autenticazione
         if (!authToken) {
             window.location.href = '/login';
         }
         
-        // Mostra username
-        const userData = localStorage.getItem('userData');
-        if (userData) {
-            const user = JSON.parse(userData);
-            document.getElementById('username').textContent = user.username;
-        }
+        document.getElementById('username').textContent = userData.username || 'Utente';
         
-        // Carica task all'avvio
-        loadTasks();
-        
-        // Form per aggiungere task
-        document.getElementById('taskForm').addEventListener('submit', async (e) => {
+        const authHeaders = {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${authToken}`
+        };
+
+        document.getElementById('searchForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             
-            const title = document.getElementById('title').value;
-            const description = document.getElementById('description').value;
+            const query = document.getElementById('searchQuery').value;
+            const type = document.getElementById('searchType').value;
             
             try {
-                const response = await fetch('/api/tasks', {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({ title, description })
+                const response = await fetch(`/api/search?q=${encodeURIComponent(query)}&type=${type}`, {
+                    headers: authHeaders
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    document.getElementById('taskForm').reset();
-                    loadTasks();
+                    displaySearchResults(data.data.results);
                 } else {
-                    document.getElementById('message').textContent = data.message;
+                    showMessage('Errore nella ricerca', 'error');
                 }
             } catch (error) {
-                document.getElementById('message').textContent = 'Errore di connessione';
+                showMessage('Errore di connessione', 'error');
             }
         });
         
-        // Carica task
-        async function loadTasks() {
+        function displaySearchResults(results) {
+            const container = document.getElementById('searchResults');
+            
+            if (!results || results.length === 0) {
+                container.innerHTML = '<p>Nessun risultato trovato</p>';
+                return;
+            }
+            
+            container.innerHTML = results.map(item => {
+                const title = item.title || item.name || 'Titolo sconosciuto';
+                const mediaType = item.media_type || (item.title ? 'movie' : 'tv');
+                const year = item.release_date || item.first_air_date;
+                const overview = item.overview || 'Nessuna descrizione disponibile';
+                
+                return `
+                    <div class="search-item">
+                        <h3>${title} (${mediaType.toUpperCase()}) ${year ? '- ' + year.substring(0, 4) : ''}</h3>
+                        <p>${overview.substring(0, 200)}...</p>
+                        <button onclick="addToLibrary(${item.id}, '${mediaType}')">Aggiungi alla Libreria</button>
+                        <button onclick="showDetails(${item.id}, '${mediaType}')">Dettagli</button>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        async function addToLibrary(tmdbId, mediaType) {
+            const endpoint = mediaType === 'movie' ? '/api/library/movies' : '/api/library/series';
+            
             try {
-                const response = await fetch('/api/tasks', {
-                    headers: { 'Authorization': `Bearer ${authToken}` }
+                const response = await fetch(endpoint, {
+                    method: 'POST',
+                    headers: authHeaders,
+                    body: JSON.stringify({ tmdbId })
                 });
                 
                 const data = await response.json();
                 
                 if (data.success) {
-                    tasks = data.data;
-                    renderTasks();
+                    showMessage(`${mediaType === 'movie' ? 'Film' : 'Serie TV'} aggiunto alla libreria!`, 'success');
+                } else {
+                    showMessage(data.message, 'error');
                 }
             } catch (error) {
-                console.error(error);
+                showMessage('Errore nell\'aggiunta', 'error');
             }
         }
         
-        // Renderizza task
-        function renderTasks() {
-            const container = document.getElementById('tasks');
-            const filteredTasks = tasks.filter(task => {
-                if (filter === 'all') return true;
-                return task.status === filter;
+        async function showDetails(tmdbId, mediaType) {
+            try {
+                const endpoint = mediaType === 'movie' ? `/api/movie/${tmdbId}` : `/api/tv/${tmdbId}`;
+                const response = await fetch(endpoint);
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    const item = data.data;
+                    const title = item.title || item.name;
+                    const overview = item.overview || 'Nessuna descrizione disponibile';
+                    const rating = item.vote_average;
+                    const year = item.release_date || item.first_air_date;
+                    
+                    alert(`${title} (${year ? year.substring(0, 4) : 'N/A'})
+                    
+Voto TMDb: ${rating}/10
+
+${overview}
+
+Generi: ${item.genres ? item.genres.map(g => g.name).join(', ') : 'N/A'}`);
+                } else {
+                    showMessage('Errore nel caricamento dettagli', 'error');
+                }
+            } catch (error) {
+                showMessage('Errore di connessione', 'error');
+            }
+        }
+        
+        async function showMovies() {
+            try {
+                const response = await fetch('/api/library/movies', {
+                    headers: authHeaders
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayLibraryContent(data.data.movies, 'movie');
+                }
+            } catch (error) {
+                showMessage('Errore nel caricamento film', 'error');
+            }
+        }
+        
+        async function showSeries() {
+            try {
+                const response = await fetch('/api/library/series', {
+                    headers: authHeaders
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayLibraryContent(data.data.series, 'tv');
+                }
+            } catch (error) {
+                showMessage('Errore nel caricamento serie TV', 'error');
+            }
+        }
+        
+        function displayLibraryContent(items, type) {
+            const container = document.getElementById('libraryContent');
+            
+            if (!items || items.length === 0) {
+                container.innerHTML = '<p>Nessun contenuto nella libreria</p>';
+                return;
+            }
+            
+            container.innerHTML = items.map(item => {
+                const title = item.title || item.name;
+                const status = item.status || item.watchStatus;
+                const rating = item.userRating;
+                const comment = item.userComment;
+                const progress = type === 'tv' && item.currentSeason && item.currentEpisode ? 
+                    `<p>Progresso: S${item.currentSeason}E${item.currentEpisode}</p>` : '';
+                
+                const statusOptions = type === 'movie' ? 
+                    '<option value="to_watch">Da vedere</option><option value="watching">Guardando</option><option value="watched">Visto</option>' :
+                    '<option value="to_watch">Da vedere</option><option value="watching">Guardando</option><option value="completed">Completato</option><option value="dropped">Abbandonato</option>';
+                
+                return `
+                    <div class="library-item">
+                        <h3>${title}</h3>
+                        <p>Stato: ${status}</p>
+                        ${rating ? `<p>Voto: ${rating}/10</p>` : ''}
+                        ${comment ? `<p>Commento: ${comment}</p>` : ''}
+                        ${progress}
+                        
+                        <form style="margin-top: 10px; border: 1px solid #ccc; padding: 10px;">
+                            <h4>Aggiorna Valutazione</h4>
+                            <div>
+                                <label>Stato:</label>
+                                <select name="status" required>
+                                    ${statusOptions}
+                                </select>
+                            </div>
+                            <div>
+                                <label>Voto (0-10):</label>
+                                <input type="number" name="rating" min="0" max="10" step="0.1" value="${rating || ''}">
+                            </div>
+                            <div>
+                                <label>Commento:</label>
+                                <textarea name="comment" rows="2" style="width: 100%;">${comment || ''}</textarea>
+                            </div>
+                            ${type === 'tv' ? `
+                            <div>
+                                <label>Stagione:</label>
+                                <input type="number" name="season" min="1" value="${item.currentSeason || 1}">
+                                <label>Episodio:</label>
+                                <input type="number" name="episode" min="1" value="${item.currentEpisode || 1}">
+                            </div>
+                            ` : ''}
+                            <button type="button" onclick="updateItem('${item._id}', '${type}', this.parentElement)">Salva</button>
+                        </form>
+                        
+                        <button onclick="removeFromLibrary('${item._id}', '${type}')">Rimuovi</button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        async function removeFromLibrary(id, type) {
+            const endpoint = type === 'movie' ? `/api/library/movies/${id}` : `/api/library/series/${id}`;
+            
+            if (confirm('Sei sicuro di voler rimuovere questo elemento?')) {
+                try {
+                    const response = await fetch(endpoint, {
+                        method: 'DELETE',
+                        headers: authHeaders
+                    });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        showMessage('Elemento rimosso', 'success');
+                        type === 'movie' ? showMovies() : showSeries();
+                    }
+                } catch (error) {
+                    showMessage('Errore nella rimozione', 'error');
+                }
+            }
+        }
+        
+        // === POPULAR CONTENT ===
+        async function loadPopularMovies() {
+            try {
+                const response = await fetch('/api/popular/movies');
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayPopularContent(data.data.results, 'movie');
+                }
+            } catch (error) {
+                showMessage('Errore nel caricamento', 'error');
+            }
+        }
+        
+        async function loadPopularTV() {
+            try {
+                const response = await fetch('/api/popular/tv');
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayPopularContent(data.data.results, 'tv');
+                }
+            } catch (error) {
+                showMessage('Errore nel caricamento', 'error');
+            }
+        }
+        
+        async function loadTrending() {
+            try {
+                const response = await fetch('/api/trending');
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayPopularContent(data.data.results, 'mixed');
+                }
+            } catch (error) {
+                showMessage('Errore nel caricamento', 'error');
+            }
+        }
+        
+        function displayPopularContent(items, type) {
+            const container = document.getElementById('popularContent');
+            
+            container.innerHTML = items.map(item => {
+                const title = item.title || item.name;
+                const mediaType = type === 'mixed' ? (item.media_type || 'unknown') : type;
+                const year = item.release_date || item.first_air_date;
+                
+                return `
+                    <div class="popular-item">
+                        <h4>${title} (${mediaType.toUpperCase()}) ${year ? '- ' + year.substring(0, 4) : ''}</h4>
+                        <p>Voto: ${item.vote_average}/10</p>
+                        <button onclick="addToLibrary(${item.id}, '${mediaType}')">Aggiungi</button>
+                    </div>
+                `;
+            }).join('');
+        }
+        
+        // === STATS ===
+        async function showStats() {
+            try {
+                const response = await fetch('/api/library/stats', {
+                    headers: authHeaders
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    displayStats(data.data);
+                }
+            } catch (error) {
+                showMessage('Errore nel caricamento statistiche', 'error');
+            }
+        }
+        
+        function displayStats(stats) {
+            const container = document.getElementById('libraryContent');
+            
+            container.innerHTML = `
+                <div class="stats">
+                    <h3>Statistiche Libreria</h3>
+                    <h4>Film:</h4>
+                    <ul>
+                        <li>Totali: ${stats.movies.totalMovies || 0}</li>
+                        <li>Visti: ${stats.movies.watchedMovies || 0}</li>
+                        <li>Da vedere: ${stats.movies.toWatchMovies || 0}</li>
+                        <li>Voto medio: ${stats.movies.averageRating ? stats.movies.averageRating.toFixed(1) : 'N/A'}</li>
+                    </ul>
+                    <h4>Serie TV:</h4>
+                    <ul>
+                        <li>Totali: ${stats.series.totalSeries || 0}</li>
+                        <li>In corso: ${stats.series.watchingSeries || 0}</li>
+                        <li>Completate: ${stats.series.completedSeries || 0}</li>
+                        <li>Da vedere: ${stats.series.toWatchSeries || 0}</li>
+                        <li>Voto medio: ${stats.series.averageRating ? stats.series.averageRating.toFixed(1) : 'N/A'}</li>
+                    </ul>
+                </div>
+            `;
+        }
+        
+        // === UPDATE ITEM ===
+        async function updateItem(itemId, type, formElement) {
+            const formData = new FormData();
+            const inputs = formElement.querySelectorAll('input, select, textarea');
+            
+            const updateData = {};
+            
+            inputs.forEach(input => {
+                if (input.name && input.value) {
+                    if (input.name === 'status') {
+                        updateData[type === 'movie' ? 'status' : 'watchStatus'] = input.value;
+                    } else if (input.name === 'rating') {
+                        updateData.userRating = parseFloat(input.value);
+                    } else if (input.name === 'comment') {
+                        updateData.userComment = input.value;
+                    } else if (input.name === 'season') {
+                        updateData.currentSeason = parseInt(input.value);
+                    } else if (input.name === 'episode') {
+                        updateData.currentEpisode = parseInt(input.value);
+                    }
+                }
             });
             
-            container.innerHTML = filteredTasks.map(task => `
-                <div style="border: 1px solid #ccc; margin: 10px; padding: 10px;">
-                    <h3>${task.title}</h3>
-                    <p>${task.description || ''}</p>
-                    <p>Status: ${task.status}</p>
-                    <button onclick="toggleTask('${task._id}')">
-                        ${task.status === 'completed' ? 'Segna come in sospeso' : 'Completa'}
-                    </button>
-                    <button onclick="deleteTask('${task._id}')">Elimina</button>
-                </div>
-            `).join('');
-        }
-        
-        // Toggle task status
-        async function toggleTask(id) {
-            const task = tasks.find(t => t._id === id);
-            const newStatus = task.status === 'completed' ? 'pending' : 'completed';
-            
             try {
-                await fetch(`/api/tasks/${id}`, {
+                const endpoint = type === 'movie' 
+                    ? `/api/library/movies/${itemId}`
+                    : `/api/library/series/${itemId}`;
+                
+                const response = await fetch(endpoint, {
                     method: 'PUT',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Authorization': `Bearer ${authToken}`
-                    },
-                    body: JSON.stringify({ status: newStatus })
+                    headers: authHeaders,
+                    body: JSON.stringify(updateData)
                 });
-                loadTasks();
-            } catch (error) {
-                console.error(error);
-            }
-        }
-        
-        // Elimina task
-        async function deleteTask(id) {
-            if (confirm('Elimina questa task?')) {
-                try {
-                    await fetch(`/api/tasks/${id}`, {
-                        method: 'DELETE',
-                        headers: { 'Authorization': `Bearer ${authToken}` }
-                    });
-                    loadTasks();
-                } catch (error) {
-                    console.error(error);
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    showMessage('Aggiornamento salvato!', 'success');
+                    // Refresh the view
+                    if (type === 'movie') {
+                        showMovies();
+                    } else {
+                        showSeries();
+                    }
+                } else {
+                    showMessage(data.message || 'Errore nel salvataggio', 'error');
                 }
+            } catch (error) {
+                showMessage('Errore di connessione', 'error');
             }
         }
         
-        // Filtri
-        function showAll() { filter = 'all'; renderTasks(); }
-        function showPending() { filter = 'pending'; renderTasks(); }
-        function showCompleted() { filter = 'completed'; renderTasks(); }
+        // === UTILITIES ===
+        function showMessage(text, type = 'info') {
+            const messageEl = document.getElementById('message');
+            messageEl.textContent = text;
+            messageEl.className = type;
+            messageEl.style.display = 'block';
+            
+            setTimeout(() => {
+                messageEl.style.display = 'none';
+            }, 3000);
+        }
         
-        // Logout
         function logout() {
             localStorage.clear();
             window.location.href = '/login';
         }
+        
+        // Load popular movies on page load
+        loadPopularMovies();
     </script>
+    
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        header { display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #ccc; padding-bottom: 10px; }
+        section { margin: 20px 0; }
+        .search-item, .library-item, .popular-item { border: 1px solid #ddd; padding: 10px; margin: 10px 0; }
+        button { margin: 5px; padding: 5px 10px; cursor: pointer; }
+        #message { position: fixed; top: 10px; right: 10px; padding: 10px; border-radius: 5px; display: none; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        input, select, textarea { margin: 5px; padding: 5px; }
+        
+        /* Form styles */
+        .library-item form { background: #f9f9f9; }
+        .library-item form div { margin: 8px 0; }
+        .library-item form label { display: inline-block; width: 80px; font-weight: bold; }
+        .library-item form input, .library-item form select, .library-item form textarea { 
+            width: 200px; 
+            padding: 4px; 
+            border: 1px solid #ccc; 
+        }
+        .library-item form textarea { width: 300px; }
+    </style>
 </body>
 </html>

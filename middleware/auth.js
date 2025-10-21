@@ -1,91 +1,59 @@
 const jwt = require('jsonwebtoken');
+const passport = require('passport');
+const { Strategy: JwtStrategy, ExtractJwt } = require('passport-jwt');
 const User = require('../models/User');
 
-// Middleware per verificare l'autenticazione JWT
-const authenticateToken = async (req, res, next) => {
-    try {
-        // Controlla l'header Authorization
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1]; // Bearer TOKEN
+const jwtOptions = {
+    jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+    secretOrKey: process.env.JWT_SECRET,
+    issuer: 'showtracker-app',
+    audience: 'showtracker-users'
+};
 
-        if (!token) {
-            return res.status(401).json({
+passport.use(new JwtStrategy(jwtOptions, async (payload, done) => {
+    try {
+        const user = await User.findById(payload.userId).select('-password');
+        
+        if (user && user.isActive) {
+            return done(null, user);
+        } else {
+            return done(null, false);
+        }
+    } catch (error) {
+        return done(error, false);
+    }
+}));
+
+const authenticateToken = (req, res, next) => {
+    passport.authenticate('jwt', { session: false }, (err, user, info) => {
+        if (err) {
+            return res.status(500).json({
                 success: false,
-                message: 'Token di accesso mancante'
+                message: 'Errore del server'
             });
         }
 
-        // Verifica il token
-        const decoded = jwt.verify(token, process.env.JWT_SECRET);
-        
-        // Cerca l'utente nel database
-        const user = await User.findById(decoded.userId).select('-password');
-        
         if (!user) {
             return res.status(401).json({
                 success: false,
-                message: 'Utente non trovato'
+                message: 'Errore Token'
             });
         }
 
-        if (!user.isActive) {
-            return res.status(401).json({
-                success: false,
-                message: 'Account disattivato'
-            });
-        }
-
-        // Aggiungi l'utente alla richiesta
         req.user = user;
         next();
-
-    } catch (error) {
-        console.error('Errore autenticazione:', error.message);
-        
-        if (error.name === 'JsonWebTokenError') {
-            return res.status(401).json({
-                success: false,
-                message: 'Token non valido'
-            });
-        }
-        
-        if (error.name === 'TokenExpiredError') {
-            return res.status(401).json({
-                success: false,
-                message: 'Token scaduto'
-            });
-        }
-
-        return res.status(500).json({
-            success: false,
-            message: 'Errore del server durante l\'autenticazione'
-        });
-    }
+    })(req, res, next);
 };
 
-// Middleware opzionale per l'autenticazione (non blocca se non c'è token)
-const optionalAuth = async (req, res, next) => {
-    try {
-        const authHeader = req.headers['authorization'];
-        const token = authHeader && authHeader.split(' ')[1];
-
-        if (token) {
-            const decoded = jwt.verify(token, process.env.JWT_SECRET);
-            const user = await User.findById(decoded.userId).select('-password');
-            
-            if (user && user.isActive) {
-                req.user = user;
-            }
+const optionalAuth = (req, res, next) => {
+    passport.authenticate('jwt', { session: false }, (err, user, info) => {
+        if (user && !err) {
+            req.user = user;
         }
-        
         next();
-    } catch (error) {
-        // Ignora errori per l'auth opzionale
-        next();
-    }
+    })(req, res, next);
 };
 
-// Middleware per verificare se l'utente è admin (per future funzionalità)
 const requireAdmin = (req, res, next) => {
     if (!req.user) {
         return res.status(401).json({
@@ -103,29 +71,26 @@ const requireAdmin = (req, res, next) => {
 
     next();
 };
-
-// Utility per generare JWT token
 const generateToken = (userId) => {
     return jwt.sign(
         { userId },
         process.env.JWT_SECRET,
         { 
-            expiresIn: '7d', // Token valido per 7 giorni
-            issuer: 'todo-app',
-            audience: 'todo-users'
+            expiresIn: '7d',
+            issuer: 'showtracker-app',
+            audience: 'showtracker-users'
         }
     );
 };
 
-// Utility per generare refresh token (per future implementazioni)
 const generateRefreshToken = (userId) => {
     return jwt.sign(
         { userId, type: 'refresh' },
         process.env.JWT_SECRET,
         { 
             expiresIn: '30d',
-            issuer: 'todo-app',
-            audience: 'todo-users'
+            issuer: 'showtracker-app',
+            audience: 'showtracker-users'
         }
     );
 };
@@ -135,5 +100,6 @@ module.exports = {
     optionalAuth,
     requireAdmin,
     generateToken,
-    generateRefreshToken
+    generateRefreshToken,
+    passport
 };
